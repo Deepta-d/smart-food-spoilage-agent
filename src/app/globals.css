@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
+/*
+ * The interface is designed as a light theme (white cards, dark text).
+ * The Next.js starter template switched body colours to near-white text on a
+ * near-black background in dark mode. Because that rule sits outside
+ * Tailwind's layers, it overrode the body's light-theme classes and made text
+ * almost invisible on the white cards. The page now always uses the light
+ * theme, and form controls render in light mode to match.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafafa;
+  --foreground: #18181b;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -12,15 +21,6 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
