@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  profile          UserProfile?
+  inventoryItems   InventoryItem[]
+  ingestionRuns    IngestionRun[]
+  mealSuggestions  MealSuggestion[]
+  notificationPref NotificationPref?
+}
+
+model UserProfile {
+  userId          String @id
+  vegetarianMode  String @default("lacto_ovo") // vegan | lacto_ovo
+  defaultMinutes  Int    @default(45)
+  defaultEnergy   Int    @default(2) // 1 low .. 3 high effort
+  stapleItemsJson String @default("[]") // JSON string[] ingredient names
+  timezone        String @default("America/Toronto")
+  retentionDays   Int    @default(30) // ingestion image purge + history hint
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model InventoryItem {
+  id               String    @id @default(cuid())
+  userId           String
+  name             String
+  normalizedName   String
+  categoryId       String
+  quantity         Float     @default(1)
+  unit             String    @default("each")
+  source           String // photo | receipt | manual
+  confidence       Float     @default(1)
+  acquiredAt       DateTime  @default(now())
+  openedAt         DateTime?
+  expiresOn        DateTime?
+  frozen           Boolean   @default(false)
+  shelfDaysOverride Int?
+  urgencyScore     Float     @default(0)
+  lastScoredAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, urgencyScore])
+}
+
+model IngestionRun {
+  id           String   @id @default(cuid())
+  userId       String
+  type         String // fridge | receipt
+  status       String   @default("pending") // pending | processing | awaiting_review | completed | failed
+  imageBase64  String? // MVP local storage in DB (small images); replace with object key in prod
+  mimeType     String?
+  modelOutput  String   @default("{}") // JSON
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model MealSuggestion {
+  id          String   @id @default(cuid())
+  userId      String
+  payloadJson String // ranked meals + scores
+  constraintsJson String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model NotificationPref {
+  userId             String    @id
+  digestEnabled      Boolean   @default(false)
+  digestHourLocal    Int       @default(17) // 0-23 local to UserProfile.timezone
+  digestSnoozeUntil  DateTime?
+  lastDigestSentAt   DateTime?
+  lastDigestContent  String? // JSON snapshot (MVP "email" = stored digest text)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
