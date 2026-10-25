@@ -52,6 +52,9 @@ type Session = {
   categories: Category[];
 };
 
+const SAMPLE_NOTICE =
+  "Sample data: no OpenAI API key is configured, so these are built-in demo results, not a real AI response. Add OPENAI_API_KEY to your .env file to use real photo scanning and meal planning.";
+
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const t = await res.text();
@@ -71,7 +74,8 @@ export function SpoilPlannerApp() {
   const [ingestReview, setIngestReview] = useState<
     { name: string; categoryId: string; quantity: number; unit: string }[]
   >([]);
-  const [tonight, setTonight] = useState<{ suggestionId: string; meals: Meal[] } | null>(null);
+  const [ingestSample, setIngestSample] = useState(false);
+  const [tonight, setTonight] = useState<{ suggestionId: string; meals: Meal[]; sample?: boolean } | null>(null);
   const [digestPreview, setDigestPreview] = useState<unknown>(null);
 
   const catLabel = useMemo(() => {
@@ -196,6 +200,7 @@ export function SpoilPlannerApp() {
     setError(null);
     setIngestId(null);
     setIngestReview([]);
+    setIngestSample(false);
     try {
       const fd = new FormData();
       fd.set("file", file);
@@ -206,8 +211,9 @@ export function SpoilPlannerApp() {
       const pr = await fetch(`/api/ingest/${out.id}/process`, { method: "POST", credentials: "include" });
       await j(pr);
       const gr = await fetch(`/api/ingest/${out.id}`, { credentials: "include" });
-      const run = await j<{ modelOutput: { kind?: string; items?: { name: string; estimated_category_id: string; confidence: number }[]; lines?: { name: string; quantity: number; unit: string; estimated_category_id: string }[] } }>(gr);
+      const run = await j<{ modelOutput: { kind?: string; sample?: boolean; items?: { name: string; estimated_category_id: string; confidence: number }[]; lines?: { name: string; quantity: number; unit: string; estimated_category_id: string }[] } }>(gr);
       const mo = run.modelOutput;
+      setIngestSample(mo.sample === true);
       if (mo.kind === "fridge" && mo.items) {
         setIngestReview(
           mo.items.map((i) => ({
@@ -247,6 +253,7 @@ export function SpoilPlannerApp() {
       await j(res);
       setIngestId(null);
       setIngestReview([]);
+      setIngestSample(false);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "commit failed");
@@ -269,7 +276,7 @@ export function SpoilPlannerApp() {
           vegetarianMode: session?.profile?.vegetarianMode,
         }),
       });
-      const out = await j<{ suggestionId: string; meals: Meal[] }>(res);
+      const out = await j<{ suggestionId: string; meals: Meal[]; sample?: boolean }>(res);
       setTonight(out);
       await load();
     } catch (e) {
@@ -303,8 +310,8 @@ export function SpoilPlannerApp() {
     setBusy(true);
     try {
       const res = await fetch(`/api/suggestions/${id}`, { credentials: "include" });
-      const out = await j<{ id: string; payload: { meals: Meal[] } }>(res);
-      setTonight({ suggestionId: out.id, meals: out.payload.meals ?? [] });
+      const out = await j<{ id: string; payload: { meals: Meal[]; sample?: boolean } }>(res);
+      setTonight({ suggestionId: out.id, meals: out.payload.meals ?? [], sample: out.payload.sample === true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
     } finally {
@@ -480,6 +487,7 @@ export function SpoilPlannerApp() {
         {ingestReview.length > 0 && (
           <div className="space-y-2 rounded border border-amber-200 bg-amber-50 p-3">
             <p className="text-sm font-medium text-amber-900">Review extracted lines, then commit.</p>
+            {ingestSample && <p className="rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-900">{SAMPLE_NOTICE}</p>}
             <table className="w-full text-left text-sm">
               <thead>
                 <tr>
@@ -660,6 +668,9 @@ export function SpoilPlannerApp() {
         >
           Rank meals for tonight
         </button>
+        {tonight?.sample && (
+          <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">{SAMPLE_NOTICE}</p>
+        )}
         {tonight && tonight.meals.length > 0 && (
           <ul className="space-y-4">
             {tonight.meals.map((m) => (
@@ -722,7 +733,7 @@ export function SpoilPlannerApp() {
         <button type="button" disabled={busy} onClick={() => void previewDigest()} className="rounded border border-zinc-300 px-3 py-1 text-sm">
           Build preview now
         </button>
-        {digestPreview && (
+        {digestPreview != null && (
           <pre className="max-h-64 overflow-auto rounded bg-zinc-50 p-2 text-xs">{JSON.stringify(digestPreview, null, 2)}</pre>
         )}
         <p className="text-xs text-zinc-500">

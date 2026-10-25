@@ -18,6 +18,34 @@ export type ReceiptLine = {
   confidence: number;
 };
 
+/**
+ * Results from the AI helpers. `sample` is true when no OPENAI_API_KEY is set
+ * and built-in demo data was returned instead of a real AI response, so the
+ * UI can label it clearly rather than presenting it as real.
+ */
+export type AiResult<T> = { data: T; sample: boolean };
+
+/** Thrown when the AI responds but its output cannot be used. */
+export class AiOutputError extends Error {
+  constructor(what: string) {
+    super(`The AI returned an unreadable ${what}. Please try again.`);
+    this.name = "AiOutputError";
+  }
+}
+
+function parseJsonObject(text: string, what: string): Record<string, unknown> {
+  const cleaned = text.replace(/```json\n?|```/g, "").trim();
+  try {
+    const parsed: unknown = JSON.parse(cleaned);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // fall through
+  }
+  throw new AiOutputError(what);
+}
+
 function client() {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return null;
@@ -30,10 +58,13 @@ export function assertImageSize(base64: string) {
   }
 }
 
-export async function visionExtractFridge(imageBase64: string, mimeType: string): Promise<FridgeCandidate[]> {
+export async function visionExtractFridge(
+  imageBase64: string,
+  mimeType: string,
+): Promise<AiResult<FridgeCandidate[]>> {
   const openai = client();
   if (!openai) {
-    return mockFridge();
+    return { data: mockFridge(), sample: true };
   }
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -52,15 +83,19 @@ Vegetarian only; do not list meat/fish.`,
       },
     ],
     max_tokens: 1200,
+    response_format: { type: "json_object" },
   });
-  const text = res.choices[0]?.message?.content ?? "{}";
-  return parseFridgeJson(text);
+  const text = res.choices[0]?.message?.content ?? "";
+  return { data: parseFridgeJson(text), sample: false };
 }
 
-export async function visionExtractReceipt(imageBase64: string, mimeType: string): Promise<ReceiptLine[]> {
+export async function visionExtractReceipt(
+  imageBase64: string,
+  mimeType: string,
+): Promise<AiResult<ReceiptLine[]>> {
   const openai = client();
   if (!openai) {
-    return mockReceipt();
+    return { data: mockReceipt(), sample: true };
   }
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -78,32 +113,26 @@ Use same category ids as fridge prompt; guess category from product name. Skip n
       },
     ],
     max_tokens: 2000,
+    response_format: { type: "json_object" },
   });
-  const text = res.choices[0]?.message?.content ?? "{}";
-  return parseReceiptJson(text);
+  const text = res.choices[0]?.message?.content ?? "";
+  return { data: parseReceiptJson(text), sample: false };
 }
 
 function parseFridgeJson(text: string): FridgeCandidate[] {
-  const cleaned = text.replace(/```json\n?|```/g, "").trim();
-  try {
-    const j = JSON.parse(cleaned) as { items?: FridgeCandidate[] };
-    const items = j.items ?? [];
-    return items.map((i) => ({
-      name: String(i.name ?? "").trim() || "Unknown",
-      confidence: typeof i.confidence === "number" ? i.confidence : 0.5,
-      estimated_category_id: guessCategoryFromText(String(i.name)),
-    }));
-  } catch {
-    return mockFridge();
-  }
+  const j = parseJsonObject(text, "fridge scan");
+  if (!Array.isArray(j.items)) throw new AiOutputError("fridge scan");
+  return (j.items as Partial<FridgeCandidate>[]).map((i) => ({
+    name: String(i.name ?? "").trim() || "Unknown",
+    confidence: typeof i.confidence === "number" ? i.confidence : 0.5,
+    estimated_category_id: guessCategoryFromText(String(i.name)),
+  }));
 }
 
 function parseReceiptJson(text: string): ReceiptLine[] {
-  const cleaned = text.replace(/```json\n?|```/g, "").trim();
-  try {
-    const j = JSON.parse(cleaned) as { lines?: ReceiptLine[] };
-    const lines = j.lines ?? [];
-    return lines.map((l) => {
+  const j = parseJsonObject(text, "receipt scan");
+  if (!Array.isArray(j.lines)) throw new AiOutputError("receipt scan");
+  return (j.lines as Partial<ReceiptLine>[]).map((l) => {
       const name = String(l.name ?? "").trim() || "Item";
       return {
         raw_line: String(l.raw_line ?? name),
@@ -114,9 +143,6 @@ function parseReceiptJson(text: string): ReceiptLine[] {
         estimated_category_id: guessCategoryFromText(name),
       };
     });
-  } catch {
-    return mockReceipt();
-  }
 }
 
 function mockFridge(): FridgeCandidate[] {
@@ -163,7 +189,7 @@ export async function generateMealDrafts(args: {
   vegetarianMode: string;
   maxMinutes: number;
   targetEnergy: number;
-}): Promise<MealDraft[]> {
+}): Promise<AiResult<MealDraft[]>> {
   const openai = client();
   const sys = `You are a vegetarian home-cook assistant. Propose meals that USE UP perishable inventory first.
 Rules:
@@ -176,7 +202,7 @@ Rules:
 
   const payload = JSON.stringify(args, null, 2);
   if (!openai) {
-    return mockMeals(args.inventoryLines);
+    return { data: mockMeals(args.inventoryLines), sample: true };
   }
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -185,15 +211,32 @@ Rules:
       { role: "user", content: payload },
     ],
     max_tokens: 2500,
+    response_format: { type: "json_object" },
   });
-  const text = res.choices[0]?.message?.content ?? "{}";
-  const cleaned = text.replace(/```json\n?|```/g, "").trim();
-  try {
-    const j = JSON.parse(cleaned) as { meals?: MealDraft[] };
-    return j.meals ?? [];
-  } catch {
-    return mockMeals(args.inventoryLines);
-  }
+  const text = res.choices[0]?.message?.content ?? "";
+  const j = parseJsonObject(text, "meal plan");
+  if (!Array.isArray(j.meals)) throw new AiOutputError("meal plan");
+  // Drop malformed meals instead of letting them crash validation later.
+  const meals = (j.meals as Partial<MealDraft>[])
+    .filter(
+      (m) =>
+        typeof m.title === "string" &&
+        typeof m.minutes === "number" &&
+        typeof m.energy === "number" &&
+        Array.isArray(m.ingredients_used) &&
+        Array.isArray(m.steps),
+    )
+    .map((m) => ({
+      title: m.title as string,
+      minutes: m.minutes as number,
+      energy: m.energy as number,
+      ingredients_used: (m.ingredients_used ?? []).filter(
+        (u) => typeof u?.inventory_item_id === "string" && typeof u?.qty === "number",
+      ),
+      steps: (m.steps ?? []).map(String),
+      optional_adds: Array.isArray(m.optional_adds) ? m.optional_adds.map(String) : [],
+    }));
+  return { data: meals, sample: false };
 }
 
 function mockMeals(

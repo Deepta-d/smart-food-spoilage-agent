@@ -13,21 +13,21 @@ export async function processIngestionRun(runId: string, userId: string) {
   });
   try {
     if (run.type === "fridge") {
-      const items = await visionExtractFridge(run.imageBase64, run.mimeType);
+      const { data: items, sample } = await visionExtractFridge(run.imageBase64, run.mimeType);
       await prisma.ingestionRun.update({
         where: { id: runId },
         data: {
           status: "awaiting_review",
-          modelOutput: JSON.stringify({ kind: "fridge", items }),
+          modelOutput: JSON.stringify({ kind: "fridge", items, sample }),
         },
       });
     } else {
-      const lines = await visionExtractReceipt(run.imageBase64, run.mimeType);
+      const { data: lines, sample } = await visionExtractReceipt(run.imageBase64, run.mimeType);
       await prisma.ingestionRun.update({
         where: { id: runId },
         data: {
           status: "awaiting_review",
-          modelOutput: JSON.stringify({ kind: "receipt", lines }),
+          modelOutput: JSON.stringify({ kind: "receipt", lines, sample }),
         },
       });
     }

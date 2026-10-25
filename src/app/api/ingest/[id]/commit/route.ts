@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { withUserCookie } from "@/lib/http-user";
 import { prisma } from "@/lib/db";
 import { normalizeName, guessCategoryFromText } from "@/lib/taxonomy";
-import { rescoreAllForUser } from "@/lib/inventory-actions";
+import { addStock, rescoreAllForUser } from "@/lib/inventory-actions";
 import type { InventorySource } from "@/lib/taxonomy";
 
 type Params = { params: Promise<{ id: string }> };
@@ -37,28 +37,16 @@ export async function POST(req: Request, { params }: Params) {
       const categoryId = it.categoryId || guessCategoryFromText(name);
       const qty = typeof it.quantity === "number" && it.quantity > 0 ? it.quantity : 1;
       const unit = String(it.unit ?? "each");
-      const existing = await prisma.inventoryItem.findFirst({
-        where: { userId, normalizedName },
+      await addStock({
+        userId,
+        name,
+        normalizedName,
+        categoryId,
+        quantity: qty,
+        unit,
+        source,
+        confidence: 0.85,
       });
-      if (existing) {
-        await prisma.inventoryItem.update({
-          where: { id: existing.id },
-          data: { quantity: existing.quantity + qty, categoryId, source },
-        });
-      } else {
-        await prisma.inventoryItem.create({
-          data: {
-            userId,
-            name,
-            normalizedName,
-            categoryId,
-            quantity: qty,
-            unit,
-            source,
-            confidence: 0.85,
-          },
-        });
-      }
     }
 
     await prisma.ingestionRun.update({

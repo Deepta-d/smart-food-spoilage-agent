@@ -126,7 +126,7 @@ export async function planTonight(args: {
     categoryId: i.categoryId,
   }));
 
-  const drafts = await generateMealDrafts({
+  const { data: drafts, sample } = await generateMealDrafts({
     inventoryLines,
     staples,
     vegetarianMode: mode,
@@ -162,16 +162,16 @@ export async function planTonight(args: {
   const topMeals = ranked.slice(0, 5).map((m, i) => ({ ...m, rank: i + 1 }));
 
   if (args.persistSuggestion === false) {
-    return { suggestionId: "", meals: topMeals };
+    return { suggestionId: "", meals: topMeals, sample };
   }
 
   const suggestion = await prisma.mealSuggestion.create({
     data: {
       userId: args.userId,
-      payloadJson: JSON.stringify({ meals: topMeals }),
+      payloadJson: JSON.stringify({ meals: topMeals, sample }),
       constraintsJson: JSON.stringify({ maxMinutes, energy, vegetarianMode: mode }),
     },
   });
 
-  return { suggestionId: suggestion.id, meals: topMeals };
+  return { suggestionId: suggestion.id, meals: topMeals, sample };
 }
